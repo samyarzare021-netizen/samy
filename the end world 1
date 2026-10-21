@@ -1,0 +1,325 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini GTA 2</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #171717;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    overflow: hidden;
+  }
+  h2 { margin: 10px; }
+  canvas {
+    display: block;
+    margin: auto;
+    width: min(100vw, 1000px);
+    height: auto;
+    background: #65734d;
+    border: 2px solid #aaa;
+  }
+  #info { padding: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<h2>MINI GTA 2</h2>
+<div id="info">WASD / Arrow Keys: Move | Space: Shoot | Enter: Enter Car</div>
+<canvas id="game" width="1000" height="650"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const keys = {};
+const world = { width: 2200, height: 1800 };
+
+const player = {
+  x: 350, y: 350, angle: 0, speed: 3,
+  inCar: false, health: 100
+};
+
+const car = {
+  x: 430, y: 350, angle: 0,
+  speed: 0, color: "#e63946"
+};
+
+let bullets = [];
+let wanted = 0;
+let score = 0;
+
+const buildings = [];
+for (let x = 100; x < world.width; x += 320) {
+  for (let y = 100; y < world.height; y += 280) {
+    buildings.push({
+      x, y,
+      w: 170 + Math.random() * 60,
+      h: 130 + Math.random() * 70,
+      color: ["#777","#858585","#626262"][Math.floor(Math.random()*3)]
+    });
+  }
+}
+
+const police = [];
+function spawnPolice() {
+  police.push({
+    x: player.x + 450,
+    y: player.y + 350,
+    angle: 0,
+    speed: 1.2
+  });
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function collides(x, y, r = 12) {
+  return buildings.some(b =>
+    x + r > b.x && x - r < b.x + b.w &&
+    y + r > b.y && y - r < b.y + b.h
+  );
+}
+
+window.addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key))
+    e.preventDefault();
+
+  if (e.key === "Enter") {
+    const d = Math.hypot(player.x-car.x, player.y-car.y);
+    if (player.inCar) {
+      player.inCar = false;
+      player.x = car.x + 35;
+      player.y = car.y + 20;
+    } else if (d < 65) {
+      player.inCar = true;
+    }
+  }
+
+  if (e.code === "Space" && !e.repeat) shoot();
+});
+
+window.addEventListener("keyup", e => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+function shoot() {
+  const x = player.inCar ? car.x : player.x;
+  const y = player.inCar ? car.y : player.y;
+  const a = player.inCar ? car.angle : player.angle;
+
+  bullets.push({
+    x: x + Math.cos(a)*20,
+    y: y + Math.sin(a)*20,
+    vx: Math.cos(a)*9,
+    vy: Math.sin(a)*9,
+    life: 70
+  });
+}
+
+function update() {
+  const up = keys.w || keys.arrowup;
+  const down = keys.s || keys.arrowdown;
+  const left = keys.a || keys.arrowleft;
+  const right = keys.d || keys.arrowright;
+
+  if (player.inCar) {
+    if (up) car.speed += 0.12;
+    if (down) car.speed -= 0.12;
+    car.speed *= 0.985;
+    car.speed = clamp(car.speed, -4, 7);
+    if (left) car.angle -= 0.045;
+    if (right) car.angle += 0.045;
+
+    const nx = clamp(car.x + Math.cos(car.angle)*car.speed, 15, world.width-15);
+    const ny = clamp(car.y + Math.sin(car.angle)*car.speed, 15, world.height-15);
+    if (!collides(nx, ny, 20)) {
+      car.x = nx;
+      car.y = ny;
+    } else car.speed = 0;
+
+    player.x = car.x;
+    player.y = car.y;
+    player.angle = car.angle;
+  } else {
+    let dx = 0, dy = 0;
+    if (up) dy--;
+    if (down) dy++;
+    if (left) dx--;
+    if (right) dx++;
+
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy);
+      dx /= len; dy /= len;
+      player.angle = Math.atan2(dy, dx);
+      const nx = clamp(player.x + dx*player.speed, 10, world.width-10);
+      const ny = clamp(player.y + dy*player.speed, 10, world.height-10);
+      if (!collides(nx, player.y)) player.x = nx;
+      if (!collides(player.x, ny)) player.y = ny;
+    }
+  }
+
+  bullets = bullets.filter(b => {
+    b.x += b.vx;
+    b.y += b.vy;
+    b.life--;
+    for (const p of police) {
+      if (Math.hypot(p.x-b.x, p.y-b.y) < 20) {
+        p.dead = true;
+        score += 100;
+        return false;
+      }
+    }
+    return b.life > 0 &&
+      b.x >= 0 && b.y >= 0 &&
+      b.x < world.width && b.y < world.height;
+  });
+
+  for (const p of police) {
+    if (p.dead) continue;
+    p.angle = Math.atan2(player.y-p.y, player.x-p.x);
+    const d = Math.hypot(player.x-p.x, player.y-p.y);
+    if (d > 35) {
+      p.x += Math.cos(p.angle)*p.speed;
+      p.y += Math.sin(p.angle)*p.speed;
+    }
+  }
+
+  for (let i = police.length-1; i >= 0; i--)
+    if (police[i].dead) police.splice(i,1);
+
+  if (wanted > 0 && police.length < wanted) spawnPolice();
+
+  const info = document.getElementById("info");
+  info.textContent =
+    `Health: ${player.health} | Score: ${score} | Wanted: ${wanted} stars | ` +
+    (player.inCar ? "Driving" : "On Foot");
+}
+
+function drawCar(x, y, angle, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = "#222";
+  ctx.fillRect(-20,-14,40,28);
+  ctx.fillStyle = color;
+  ctx.fillRect(-18,-11,36,22);
+  ctx.fillStyle = "#a9d6e5";
+  ctx.fillRect(0,-9,9,18);
+  ctx.fillStyle = "#fff5b1";
+  ctx.fillRect(15,-8,4,5);
+  ctx.fillRect(15,3,4,5);
+  ctx.restore();
+}
+
+function drawPerson(x, y, angle, color) {
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(0,0,10,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = "#f4d6b0";
+  ctx.fillRect(2,-4,8,8);
+  ctx.restore();
+}
+
+function render() {
+  const camX = clamp(player.x-canvas.width/2, 0, world.width-canvas.width);
+  const camY = clamp(player.y-canvas.height/2, 0, world.height-canvas.height);
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
+  ctx.translate(-camX,-camY);
+
+  ctx.fillStyle = "#687750";
+  ctx.fillRect(0,0,world.width,world.height);
+
+  // Roads
+  ctx.fillStyle = "#3e4145";
+  for (let x=0; x<world.width; x+=320)
+    ctx.fillRect(x-35,0,70,world.height);
+  for (let y=0; y<world.height; y+=280)
+    ctx.fillRect(0,y-35,world.width,70);
+
+  // Road markings
+  ctx.strokeStyle = "#d7c778";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([18,18]);
+  for (let x=0; x<world.width; x+=320) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,world.height); ctx.stroke();
+  }
+  for (let y=0; y<world.height; y+=280) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(world.width,y); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  for (const b of buildings) {
+    ctx.fillStyle = "#444";
+    ctx.fillRect(b.x+7,b.y+7,b.w,b.h);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(b.x,b.y,b.w,b.h);
+    ctx.fillStyle = "#aaa";
+    for (let x=b.x+15; x<b.x+b.w-10; x+=30) {
+      for (let y=b.y+15; y<b.y+b.h-10; y+=30) {
+        ctx.fillRect(x,y,10,10);
+      }
+    }
+  }
+
+  drawCar(car.x,car.y,car.angle,car.color);
+
+  for (const p of police) {
+    drawCar(p.x,p.y,p.angle,"#2674e8");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(p.x-5,p.y-5,10,10);
+  }
+
+  if (!player.inCar)
+    drawPerson(player.x,player.y,player.angle,"#f2c14e");
+
+  ctx.fillStyle = "#ffe66d";
+  for (const b of bullets) {
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,4,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  // Mini map
+  ctx.fillStyle = "#111d";
+  ctx.fillRect(canvas.width-155,12,143,115);
+  ctx.fillStyle = "#8c9c68";
+  ctx.fillRect(canvas.width-150,17,133,105);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(
+    canvas.width-150+player.x/world.width*133-3,
+    17+player.y/world.height*105-3,6,6
+  );
+}
+
+function loop() {
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+canvas.addEventListener("click", () => {
+  if (!player.inCar) shoot();
+});
+
+canvas.addEventListener("dblclick", () => {
+  wanted = Math.min(5, wanted+1);
+});
+
+loop();
+</script>
+</body>
+</html>
